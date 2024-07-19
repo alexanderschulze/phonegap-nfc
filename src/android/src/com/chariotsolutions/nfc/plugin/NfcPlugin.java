@@ -5,7 +5,6 @@ import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Date;
 import java.util.Iterator;
 import java.util.List;
 
@@ -21,19 +20,16 @@ import android.app.PendingIntent;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.IntentFilter.MalformedMimeTypeException;
-import android.net.Uri;
 import android.nfc.FormatException;
 import android.nfc.NdefMessage;
 import android.nfc.NdefRecord;
 import android.nfc.NfcAdapter;
-import android.nfc.NfcEvent;
 import android.nfc.Tag;
 import android.nfc.TagLostException;
 import android.nfc.tech.Ndef;
 import android.nfc.tech.NdefFormatable;
 import android.nfc.tech.TagTechnology;
 import android.os.Bundle;
-import android.os.Handler;
 import android.os.Parcelable;
 import android.util.Log;
 
@@ -48,10 +44,6 @@ public class NfcPlugin extends CordovaPlugin {
     private static final String WRITE_TAG = "writeTag";
     private static final String MAKE_READ_ONLY = "makeReadOnly";
     private static final String ERASE_TAG = "eraseTag";
-    private static final String SHARE_TAG = "shareTag";
-    private static final String UNSHARE_TAG = "unshareTag";
-    private static final String HANDOVER = "handover"; // Android Beam
-    private static final String STOP_HANDOVER = "stopHandover";
     private static final String ENABLED = "enabled";
     private static final String INIT = "init";
     private static final String SHOW_SETTINGS = "showSettings";
@@ -88,22 +80,6 @@ public class NfcPlugin extends CordovaPlugin {
     private CallbackContext readerModeCallback;
     private CallbackContext channelCallback;
 
-    private PostponedPluginResult postponedPluginResult = null;
-
-    class PostponedPluginResult {
-        private Date moment;
-        private PluginResult pluginResult;
-
-        PostponedPluginResult(Date moment, PluginResult pluginResult) {
-            this.moment = moment;
-            this.pluginResult = pluginResult;
-        }
-
-        boolean isValid() {
-            return this.moment.after(new Date(new Date().getTime() - 30000));
-        }
-    }
-
     @Override
     public boolean execute(String action, JSONArray data, CallbackContext callbackContext) throws JSONException {
 
@@ -119,21 +95,6 @@ public class NfcPlugin extends CordovaPlugin {
         // the channel is set up when the plugin starts
         if (action.equalsIgnoreCase(CHANNEL)) {
             channelCallback = callbackContext;
-
-            if (postponedPluginResult != null) {
-                Log.i(TAG, "Postponed plugin result available");
-
-                if (postponedPluginResult.isValid()) {
-                    Log.i(TAG, "Postponed plugin result is valid, resending it now");
-
-                    channelCallback.sendPluginResult(postponedPluginResult.pluginResult);
-                } else {
-                    Log.i(TAG, "Postponed plugin result not valid anymore, so ignoring it");
-                }
-
-                postponedPluginResult = null;
-            }
-
             return true; // short circuit
         }
 
@@ -183,18 +144,6 @@ public class NfcPlugin extends CordovaPlugin {
 
         } else if (action.equalsIgnoreCase(ERASE_TAG)) {
             eraseTag(callbackContext);
-
-        } else if (action.equalsIgnoreCase(SHARE_TAG)) {
-            shareTag(data, callbackContext);
-
-        } else if (action.equalsIgnoreCase(UNSHARE_TAG)) {
-            unshareTag(callbackContext);
-
-        } else if (action.equalsIgnoreCase(HANDOVER)) {
-            handover(data, callbackContext);
-
-        } else if (action.equalsIgnoreCase(STOP_HANDOVER)) {
-            stopHandover(callbackContext);
 
         } else if (action.equalsIgnoreCase(INIT)) {
             init(callbackContext);
@@ -270,7 +219,7 @@ public class NfcPlugin extends CordovaPlugin {
                 Ndef ndef = Ndef.get(tag);
                 json = Util.ndefToJSON(ndef);
             } else {
-                json = Util.tagToJSON(tag, null);
+                json = Util.tagToJSON(tag);
             }
 
             Intent tagIntent = new Intent();
@@ -318,10 +267,6 @@ public class NfcPlugin extends CordovaPlugin {
         callbackContext.success();
     }
 
-    private void unshareTag(CallbackContext callbackContext) {
-        callbackContext.success();
-    }
-
     private void init(CallbackContext callbackContext) {
         Log.d(TAG, "Enabling plugin " + getIntent());
 
@@ -355,7 +300,7 @@ public class NfcPlugin extends CordovaPlugin {
     private void eraseTag(CallbackContext callbackContext) {
         Tag tag = savedIntent.getParcelableExtra(NfcAdapter.EXTRA_TAG);
         NdefRecord[] records = {
-            new NdefRecord(NdefRecord.TNF_EMPTY, new byte[0], new byte[0], new byte[0])
+                new NdefRecord(NdefRecord.TNF_EMPTY, new byte[0], new byte[0], new byte[0])
         };
         writeNdefMessage(new NdefMessage(records), tag, callbackContext);
     }
@@ -381,7 +326,7 @@ public class NfcPlugin extends CordovaPlugin {
                         int size = message.toByteArray().length;
                         if (ndef.getMaxSize() < size) {
                             callbackContext.error("Tag capacity is " + ndef.getMaxSize() +
-                                " bytes, message is " + size + " bytes.");
+                                    " bytes, message is " + size + " bytes.");
                         } else {
                             ndef.writeNdefMessage(message);
                             callbackContext.success();
@@ -464,18 +409,6 @@ public class NfcPlugin extends CordovaPlugin {
         });
     }
 
-    private void shareTag(JSONArray data, CallbackContext callbackContext) throws JSONException {
-        callbackContext.success();
-    }
-
-    private void handover(JSONArray data, CallbackContext callbackContext) throws JSONException {
-        callbackContext.success();
-    }
-
-    private void stopHandover(CallbackContext callbackContext) {
-        callbackContext.success();
-    }
-
     private void showSettings(CallbackContext callbackContext) {
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.JELLY_BEAN) {
             Intent intent = new Intent(android.provider.Settings.ACTION_NFC_SETTINGS);
@@ -492,7 +425,7 @@ public class NfcPlugin extends CordovaPlugin {
             Activity activity = getActivity();
             Intent intent = new Intent(activity, activity.getClass());
             intent.addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
-            pendingIntent = PendingIntent.getActivity(activity, 0, intent, PendingIntent.FLAG_MUTABLE);
+            pendingIntent = PendingIntent.getActivity(activity, 0, intent, 0);
         }
     }
 
@@ -655,7 +588,7 @@ public class NfcPlugin extends CordovaPlugin {
             }
 
             if (action.equals(NfcAdapter.ACTION_TAG_DISCOVERED)) {
-                fireTagEvent(tag, messages);
+                fireTagEvent(tag);
             }
 
             setIntent(new Intent());
@@ -672,12 +605,7 @@ public class NfcPlugin extends CordovaPlugin {
 
             PluginResult result = new PluginResult(PluginResult.Status.OK, event);
             result.setKeepCallback(true);
-
-            if (channelCallback != null) {
-                channelCallback.sendPluginResult(result);
-            } else {
-                postponedPluginResult = new PostponedPluginResult(new Date(), result);
-            }
+            channelCallback.sendPluginResult(result);
         } catch (JSONException e) {
             Log.e(TAG, "Error sending NFC event through the channel", e);
         }
@@ -690,11 +618,11 @@ public class NfcPlugin extends CordovaPlugin {
     }
 
     private void fireNdefFormatableEvent(Tag tag) {
-        sendEvent(NDEF_FORMATABLE, Util.tagToJSON(tag, null));
+        sendEvent(NDEF_FORMATABLE, Util.tagToJSON(tag));
     }
 
-    private void fireTagEvent(Tag tag, Parcelable[] messages) {
-        sendEvent(TAG_DEFAULT, Util.tagToJSON(tag, messages));
+    private void fireTagEvent(Tag tag) {
+        sendEvent(TAG_DEFAULT, Util.tagToJSON(tag));
     }
 
     private JSONObject buildNdefJSON(Ndef ndef, Parcelable[] messages) {
@@ -812,9 +740,9 @@ public class NfcPlugin extends CordovaPlugin {
                     try {
                         Method maxTransceiveLengthMethod = tagTechnologyClass.getMethod("getMaxTransceiveLength");
                         resultObject.put("maxTransceiveLength", maxTransceiveLengthMethod.invoke(tagTechnology));
-                    } catch (NoSuchMethodException e) {
+                    } catch(NoSuchMethodException e) {
                         // Some technologies do not support this, so just ignore.
-                    } catch (JSONException e) {
+                    } catch(JSONException e) {
                         Log.e(TAG, "Error serializing JSON", e);
                     }
                 }
